@@ -1,0 +1,842 @@
+<html>
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.js"></script>
+    <style>
+      body {
+        margin: 0;
+        font-family: 'Courier New', Courier, monospace;
+      }
+      .background {
+        width: 100%;
+        height: 100%;
+        position: absolute;
+      }
+      #page {
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        mix-blend-mode: difference;
+        background-color: #eee;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      span {
+        display: block;
+      }
+      fieldset {
+        border: none;
+      }
+      .mode {
+        display: block;
+        padding: 1px 6px;
+        cursor: pointer;
+      }
+      input[type=radio] {
+        display: none;
+      }
+      label:has(input[type=radio]:checked) {
+        font-weight: bold;
+        background-color: #222;
+        color: #eee;
+      }
+      .theme-picker {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+      }
+      .header {
+        height: 15vh;
+        width: 100vw;
+        position: fixed;
+        top: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #eee;
+      }
+      .footer {
+        height: 15vh;
+        width: 100vw;
+        position: fixed;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #eee;
+      }
+      #qrcode {
+        transition: transform 1s;
+      }
+    </style>
+    <script>
+      // Helper functions
+      function random(min, max) { return Math.floor(Math.random() * (max - min + 1) + min) }
+      function randomItem(list) { return list[random(0, list.length)] }
+
+      function createSvgElement(tagName, attributes) {
+        const svgElement = document.createElementNS('http://www.w3.org/2000/svg', tagName)
+        if (attributes) Object.keys(attributes).forEach((key) => svgElement.setAttribute(key, attributes[key]))
+        return svgElement
+      }
+      function createRectElement(attributes) { return createSvgElement('rect', attributes) }
+      function createCircleElement(attributes) { return createSvgElement('circle', attributes) }
+
+      function svg2img(element) { return 'data:image/svg+xml;base64,' + btoa(new XMLSerializer().serializeToString(element)) }
+
+    </script>
+
+    <script>
+      class Game {
+        parentSvg = document.getElementById('qrcode')
+        intervals = []
+        events = {}
+
+        constructor(id, description) {
+          this.id = id
+          this.description = description
+        }
+
+        start() {
+          throw new Error('start not implemented')
+        }
+
+        setInterval(handler, timeout) {
+          const intervalId = setInterval(handler, timeout)
+          this.intervals.push(intervalId)
+        }
+
+        getParentWidth() {
+          return Number(this.parentSvg.getAttribute('width'))
+        }
+
+        addEventListener(event, listener) {
+          document.addEventListener(event, listener)
+          this.events[event] = listener
+        }
+
+        createRectElement(attributes = {}) {
+          return createRectElement({ ...attributes, [this.id]: 'true', 'qrcode': 'true' })
+        }
+
+        insertRectElement(attributes = {}) {
+          const rect = this.createRectElement(attributes)
+          this.parentSvg.appendChild(rect)
+          return rect
+        }
+
+        getElement(attributes = {}, elementType = '*') {
+          const attributesFilter = Object.keys(attributes).map(attribute => `[${attribute}="${attributes[attribute]}"]`)
+          return document.querySelector(`${elementType}${attributesFilter.join('')}`)
+        }
+
+        getElements(attributes = {}, elementType = '*') {
+          const attributesFilter = Object.keys(attributes).map(attribute => `[${attribute}="${attributes[attribute]}"]`)
+          return document.querySelectorAll(`${elementType}${attributesFilter.join('')}`)
+        }
+
+        getRectElement(attributes = {}) {
+          return this.getElement(attributes, 'rect')
+        }
+
+        getRectElements(attributes = {}) {
+          return this.getElements(attributes, 'rect')
+        }
+
+        addBorders(activeBorders = []) {
+          const width = this.getParentWidth()
+          const borders = [
+            [0, 0, width, pixelSize], // top
+            [0, width - pixelSize, width, pixelSize], //bottom
+            [0, 0, pixelSize, width], //right
+            [width - pixelSize, 0, pixelSize, width] //left
+          ]
+          borders.forEach((border, index) => {
+            if (activeBorders.includes(index)) {
+              this.insertRectElement({
+                'x': border[0],
+                'y': border[1],
+                'width': border[2],
+                'height': border[3],
+                'fill': BLACK,
+              })
+            }
+          })
+        }
+
+        destroy() {
+          const gameObjects = this.getElements({ [this.id]: true })
+          gameObjects.forEach(rect => rect.remove())
+
+          this.intervals.forEach(clearInterval)
+          this.intervals = []
+
+          Object.keys(this.events).forEach(event => document.removeEventListener(event, this.events[event]))
+          this.events = {}
+        }
+      }
+
+      class BallGame extends Game {
+        ballVelocity = 5
+
+        constructor(id, description) {
+          super(id, description)
+        }
+
+        createBall() {
+          const svgWidth = this.getParentWidth()
+
+          const radius = pixelSize / 4
+
+          this.ball = new Ball(radius, random(0, svgWidth), random(0, svgWidth))
+          while(getOverlappingPixel(this.ball)) {
+            this.ball = new Ball(radius, random(0, svgWidth), random(0, svgWidth))
+          }
+
+          const ballComponent = this.ball.create()
+          ballComponent.setAttribute(this.id, 'true')
+          this.parentSvg.appendChild(ballComponent)
+        }
+
+        startBallMovement() {
+          this.createBall()
+
+          this.setInterval(() => {
+            const nexPosition = this.ball.getNextPosition()
+
+            const ballOnNewPosition = new Ball(this.ball.r, nexPosition.x, nexPosition.y)
+            const overlappingPixel = getOverlappingPixel(ballOnNewPosition, true)
+            if (overlappingPixel) {
+              this.onBallColision(ballOnNewPosition, overlappingPixel)
+            }
+
+            this.ball.move()
+          }, this.ballVelocity)
+        }
+
+        onBallColision(ballOnNewPosition, overlappedElement) {
+          const overlappingAxis = ballOnNewPosition.overlaps(overlappedElement)
+          this.ball.reroute(overlappingAxis)
+        }
+      }
+
+      class FreeDrawingGame extends Game {
+        constructor() {
+          super('free-drawing', 'Click on the pixels to change their value')
+        }
+
+        start() {
+          this.addBorders([0, 1, 2, 3])
+        }
+      }
+
+      class SnakeGame extends Game {
+        snakePosition = []
+        snakeDirection = 'right'
+
+        constructor() {
+          super('snake', 'Snake game')
+        }
+
+        start() {
+          this.addBorders([0, 1, 2, 3])
+          this.startSnake()
+        }
+
+        startSnake() {
+          const width = this.getParentWidth() / pixelSize
+          const y = Math.floor(width / 2)
+          this.snakePosition.push(...[[5, y], [4, y], [3, y]])
+
+          this.addEventListener('keydown', this.movementEvent.bind(this))
+          this.renderSnake()
+
+          this.setInterval(() => {
+            this.moveSnake()
+          }, 500)
+        }
+
+        renderSnake() {
+          const snakeRects = this.getRectElements({ 'snake-body': true })
+          snakeRects.forEach(rect => rect.remove())
+          this.snakePosition.forEach(([x, y]) => {
+            this.insertRectElement({
+              'x': x * pixelSize,
+              'y': y * pixelSize,
+              'width': pixelSize,
+              'height': pixelSize,
+              'fill': '#00FF00',
+              'snake-body': 'true'
+            })
+          })
+        }
+
+        moveSnake() {
+          const [x, y] = this.snakePosition[0]
+          const nextPosition = [x, y]
+          const movement = {
+            'right': () => nextPosition[0]++,
+            'left': () => nextPosition[0]--,
+            'down': () => nextPosition[1]++,
+            'up': () => nextPosition[1]--
+          }
+          movement[this.snakeDirection]()
+          
+          this.snakePosition.unshift(nextPosition)
+          const eatenPixel = this.getRectElement({ pixel: true, x: nextPosition[0] * pixelSize, y: nextPosition[1] * pixelSize, fill: BLACK })
+          if (eatenPixel) {
+            eatenPixel.setAttribute('fill', WHITE)
+          } else {
+            this.snakePosition.pop()
+          }
+
+          this.renderSnake()
+        }
+
+        movementEvent(event) {
+          const movements = {
+            'ArrowRight': () => this.snakeDirection = 'right',
+            'ArrowLeft': () => this.snakeDirection = 'left',
+            'ArrowDown': () => this.snakeDirection = 'down',
+            'ArrowUp': () => this.snakeDirection = 'up',
+          }
+          movements[event.key]?.()
+        }
+      }
+
+      class BrickBreakerGame extends BallGame {
+        velocity = 20
+
+        constructor() {
+          super('brick-breaker', 'Move the bottom bar to break bricks')
+        }
+
+        start() {
+          this.addBorders([0, 2, 3])
+          this.startBallMovement()
+          this.createMovementBar()
+        }
+
+        onBallColision(ballOnNewPosition, overlappedElement) {
+          if (overlappedElement.getAttribute('pixel') === 'true') {
+            removePixel(overlappedElement)
+          }
+          
+          super.onBallColision(ballOnNewPosition, overlappedElement)
+        }
+
+        createMovementBar() {
+          const qrCodeWidth = this.getParentWidth()
+          this.movementBarBoundingRect = [
+            qrCodeWidth / 2.5, // x
+            qrCodeWidth - pixelSize, // y
+            qrCodeWidth / 4, // width
+            pixelSize // height
+          ]
+
+          const rect = this.insertRectElement({
+            'x': this.movementBarBoundingRect[0],
+            'y': this.movementBarBoundingRect[1],
+            'width': this.movementBarBoundingRect[2],
+            'height': this.movementBarBoundingRect[3],
+            'fill': BLACK,
+          })
+
+          this.movementBar = rect
+          this.addEventListener('keydown', this.keyDown.bind(this))
+        }
+
+        keyDown(event) {
+          const qrCodeWidth = this.getParentWidth()
+
+          if (event.key === 'ArrowRight' && this.movementBarBoundingRect[0] + this.movementBarBoundingRect[2] < qrCodeWidth - pixelSize) {
+            this.movementBarBoundingRect[0] = this.movementBarBoundingRect[0] + this.velocity
+            this.movementBar.setAttribute('x', this.movementBarBoundingRect[0])
+          }
+          if (event.key === 'ArrowLeft' && this.movementBarBoundingRect[0] > pixelSize) {
+            this.movementBarBoundingRect[0] = this.movementBarBoundingRect[0] - this.velocity
+            this.movementBar.setAttribute('x', this.movementBarBoundingRect[0])
+          }
+        }
+      }
+
+      class PongGame extends BallGame {
+        velocity = 20
+
+        constructor() {
+          super('pong', 'Move the bars and don\'t let the ball go')
+        }
+
+        start() {
+          this.addBorders([0, 1])
+
+          const width = this.getParentWidth()
+
+          this.createMovementBar('wasd', [
+            0, // x
+            width / 2.5, // y
+            pixelSize, // width
+            width / 4 // height
+          ])
+          this.createMovementBar('arrows', [
+            width - pixelSize, // x
+            width / 2.5, // y
+            pixelSize, // width
+            width / 4 // height
+          ])
+
+          this.startBallMovement()
+        }
+
+        createMovementBar(movementBarId, boundingRect) {
+          const qrCodeWidth = this.getParentWidth()
+          const boundingRectId = movementBarId + '-boundingRect'
+          this[boundingRectId] = boundingRect
+
+          const rect = this.insertRectElement({
+            'x': this[boundingRectId][0],
+            'y': this[boundingRectId][1],
+            'width': this[boundingRectId][2],
+            'height': this[boundingRectId][3],
+            'fill': BLACK,
+          })
+
+          this[movementBarId] = rect
+          this.addEventListener('keydown', this.keyDown.bind(this))
+        }
+
+        keyDown(event) {
+          const qrCodeWidth = this.getParentWidth()
+
+          if (event.key === 'ArrowDown' && this['arrows-boundingRect'][1] + this['arrows-boundingRect'][3] < qrCodeWidth - pixelSize) {
+            this['arrows-boundingRect'][1] = this['arrows-boundingRect'][1] + this.velocity
+            this['arrows'].setAttribute('y', this['arrows-boundingRect'][1])
+          }
+          if (event.key === 'ArrowUp' && this['arrows-boundingRect'][1] > pixelSize) {
+            this['arrows-boundingRect'][1] = this['arrows-boundingRect'][1] - this.velocity
+            this['arrows'].setAttribute('y', this['arrows-boundingRect'][1])
+          }
+
+          if (event.key === 's' && this['wasd-boundingRect'][1] + this['wasd-boundingRect'][3] < qrCodeWidth - pixelSize) {
+            this['wasd-boundingRect'][1] = this['wasd-boundingRect'][1] + this.velocity
+            this['wasd'].setAttribute('y', this['wasd-boundingRect'][1])
+          }
+          if (event.key === 'w' && this['wasd-boundingRect'][1] > pixelSize) {
+            this['wasd-boundingRect'][1] = this['wasd-boundingRect'][1] - this.velocity
+            this['wasd'].setAttribute('y', this['wasd-boundingRect'][1])
+          }
+        }
+      }
+
+      class MazeGame extends Game {
+        constructor() {
+          super('maze', 'Maze')
+        }
+
+        start() {
+          this.addBorders([0, 1, 2, 3])
+          this.boardX = 0
+          this.boardY = -120
+          this.renderBoard()
+          this.startPlayer()
+        }
+
+        renderBoard() {
+          this.parentSvg.style.transform = `perspective(300px) rotateX(50deg) translate(${this.boardX}px, ${this.boardY}px)`
+        }
+
+        startPlayer() {
+          const width = this.getParentWidth() / pixelSize
+          this.playerPosition = [Math.ceil(width / 2), width - 2]
+          this.addEventListener('keydown', this.movementEvent.bind(this))
+          this.renderPlayer()
+        }
+
+        renderPlayer() {
+          const playerRect = this.getRectElements({ 'player-body': true })
+          playerRect.forEach(rect => rect.remove())
+          this.insertRectElement({
+            'x': this.playerPosition[0] * pixelSize,
+            'y': this.playerPosition[1] * pixelSize,
+            'width': pixelSize,
+            'height': pixelSize,
+            'fill': '#FF0000',
+            'player-body': 'true'
+          })
+        }
+
+        movementEvent(event) {
+          const [x, y] = this.playerPosition
+          const movements = {
+            'ArrowRight': () => {
+              const hasPixel = this.getRectElement({ pixel: true, x: (x + 1) * pixelSize, y: y * pixelSize, fill: BLACK })
+              if (!hasPixel) {
+                this.playerPosition[0]++;
+                this.boardX -= pixelSize;
+              }
+            },
+            'ArrowLeft': () => {
+              const hasPixel = this.getRectElement({ pixel: true, x: (x - 1) * pixelSize, y: y * pixelSize, fill: BLACK })
+              if (!hasPixel) {
+                this.playerPosition[0]--;
+                this.boardX += pixelSize;
+              }
+            },
+            'ArrowDown': () => {
+              const hasPixel = this.getRectElement({ pixel: true, x: x * pixelSize, y: (y + 1) * pixelSize, fill: BLACK })
+              if (!hasPixel) {
+                this.playerPosition[1]++;
+                this.boardY -= pixelSize;
+              }
+            },
+            'ArrowUp': () => {
+              const hasPixel = this.getRectElement({ pixel: true, x: x * pixelSize, y: (y - 1) * pixelSize, fill: BLACK })
+              if (!hasPixel) {
+                this.playerPosition[1]--;
+                this.boardY += pixelSize;
+              }
+            }
+          }
+          movements[event.key]?.()
+          this.renderPlayer()
+          this.renderBoard()
+        }
+
+        destroy() {
+          super.destroy()
+          this.parentSvg.style.transform = ''
+        }
+      }
+
+      class GravityGame extends Game {
+        constructor() {
+          super('gravity', 'Let the gravity work')
+        }
+
+        start() {
+          this.addBorders([0, 1, 2, 3])
+          this.startGravity()
+        }
+
+        startGravity() {
+          const lastRowCount = Math.sqrt(document.querySelectorAll('rect[pixel="true"]').length)
+
+          this.setInterval(() => {
+            const pixels = [...document.querySelectorAll('rect[pixel="true"]')]
+            const highestY = Math.max(...pixels.map(pixel => Number(pixel.getAttribute('y'))))
+            const sortedPixels = pixels.sort((a, b) => Number(b.getAttribute('y') - Number(a.getAttribute('y'))))
+            sortedPixels.forEach(pixel => {
+              const currentY = Number(pixel.getAttribute('y'))
+              const currentColor = pixel.getAttribute('fill')
+              if (currentY !== highestY && currentColor === BLACK) {
+                const nextY = currentY + pixelSize
+                const pixelBelow = document.querySelector(`rect[y="${nextY}"][x="${pixel.getAttribute('x')}"]`)
+                if (pixelBelow) {
+                  if (pixelBelow.getAttribute('fill') === WHITE) {
+                    pixelBelow.setAttribute('fill', BLACK)
+                    pixel.setAttribute('fill', WHITE)
+                  }
+                }
+              }
+            })
+          }, 300)
+        }
+      }
+
+      class Ball {
+        vX = 0.9 // velocity on X axis
+        vY = 0.9 // velocity on Y axis
+
+        constructor(r, x, y) {
+          this.r = r
+          this.x = x
+          this.y = y
+        }
+
+        create() {
+          const { r, x, y } = this
+          const ball = createCircleElement({ 'id': 'ball', 'r': r, 'cx': x, 'cy': y, 'fill': 'green' })
+          this.svgComponent = ball
+
+          return ball
+        }
+
+        destroy() {
+          this.svgComponent.remove()
+        }
+
+        getNextPosition() {
+          return {
+            x: this.x + this.vX,
+            y: this.y + this.vY
+          }
+        }
+
+        reroute(axis) {          
+          if (axis === 'x') {
+            this.vX *= -1
+          } else {
+            this.vY *= -1
+          }
+        }
+
+        move() {
+          this.x = this.x + this.vX
+          this.y = this.y + this.vY
+
+          this.update()
+        }
+
+        update() {
+          const newElement = this.svgComponent.cloneNode()
+          this.svgComponent.parentElement.appendChild(newElement)
+          this.svgComponent.remove()
+
+          this.svgComponent = newElement
+          this.svgComponent.setAttribute('cx', this.x)
+          this.svgComponent.setAttribute('cy', this.y)
+        }
+
+        overlaps(rect) {
+          const rectX = Number(rect.getAttribute('x'))
+          const rectY = Number(rect.getAttribute('y'))
+          const rectWidth = Number(rect.getAttribute('width'))
+          const rectHeight = Number(rect.getAttribute('height'))
+
+          const distX = Math.abs(this.x - rectX - rectWidth / 2)
+          const distY = Math.abs(this.y - rectY - rectHeight / 2)
+
+          if (distX > (rectWidth / 2 + this.r)) return ''
+          if (distY > (rectHeight / 2 + this.r)) return ''
+
+          if (distX <= (rectWidth / 2)) return 'y'
+          if (distY <= (rectHeight / 2)) return 'x'
+
+          const dx = distX - rectWidth / 2
+          const dy = distY - rectHeight / 2
+
+          if (dx * dx + dy * dy <= (this.r * this.r)) {
+            return (dx < dy) ? 'y' : 'x'
+          } else {
+            return ''
+          }
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div>
+      <svg class="background">
+        <rect id="background" width="100%" height="100%" fill="#222"></rect>
+      </svg>
+      <div id="page">
+
+        <div class="header">
+          <fieldset id="mode-options">
+            <label class="mode"><input type="radio" name="mode" id="mode-1" value="1" checked /> 1 - Free drawing</label>
+            <label class="mode"><input type="radio" name="mode" id="mode-2" value="2" /> 2 - Snake</label>
+            <label class="mode"><input type="radio" name="mode" id="mode-3" value="3" /> 3 - Brick breaker</label>
+            <label class="mode"><input type="radio" name="mode" id="mode-4" value="4" /> 4 - Pong</label>
+            <label class="mode"><input type="radio" name="mode" id="mode-5" value="5" /> 5 - Maze</label>
+            <label class="mode"><input type="radio" name="mode" id="mode-6" value="6" /> 6 - Gravity</label>
+            <!-- 7 - Poem in qrcode -->
+          </fieldset>
+        </div>
+
+        <br>
+        <svg id="qrcode"></svg>
+        <br>
+        
+        <div class="footer">
+          <label for="text">Text <input type="text" id="text" value="https://cgreinhold.dev" /></label>
+        </div>
+
+        <label class="theme-picker" for="theme-picker">Theme <input type="checkbox" id="theme-picker" onchange="changeTheme()"/></label>
+      </div>
+    </div>
+    <script >
+      let pixelSize = 15
+      const WHITE = '#eee'
+      const BLACK = '#222'
+      let currentModeKey = 0
+      let currentMode = null
+      let ball;
+
+      const GAME_MODES = {
+        1: FreeDrawingGame,
+        2: SnakeGame,
+        3: BrickBreakerGame,
+        4: PongGame,
+        5: MazeGame,
+        6: GravityGame,
+      }
+
+      function restartMode(mode) {
+        currentMode?.destroy()
+        currentModeKey = mode
+        if (GAME_MODES[mode]) {
+          currentMode = new GAME_MODES[mode]()
+          currentMode.start()
+        }
+      }
+
+      function onModeChange(mode) {
+        Object.keys(GAME_MODES).forEach(gameMode => {
+          if (gameMode === mode && currentModeKey !== mode) {
+            restartMode(mode)
+          }
+        })
+      }
+
+      document.getElementById('text').addEventListener('input', onTextChange)
+      document.getElementById('mode-options').addEventListener('change', (event) => onModeChange(event.target.value))
+      document.addEventListener('keydown', (event) => {
+        const input = document.querySelector(`#mode-${event.key}`)
+        if (input) {
+          input.checked = true
+          onModeChange(event.key)
+        }
+      })
+
+      function getQrCodeSvgWidth() {
+        const greaterDimension = innerWidth// innerHeight > innerWidth ? innerHeight : innerWidth
+        const percent = greaterDimension / 100 * 80
+        if (percent <= 200) return 200
+        if (percent >= 645) return 550
+        return Math.ceil(percent)
+      }
+
+      function changeTheme() {
+        const background = document.querySelector('.background')
+        const { width, height } = background.getBoundingClientRect()
+
+        const columnCount = Math.ceil(width / pixelSize)
+        const rowCount = Math.ceil(height / pixelSize)
+        const pixelCount = columnCount * rowCount
+
+        const currentColor = document.querySelector('#background').getAttribute('fill')
+        const nextColor = currentColor === WHITE ? BLACK : WHITE
+
+        const pixelsToUpdate = new Array(pixelCount)
+          .fill(0)
+          .map((_i, index) => index)
+          .sort((a, b) => .5 - Math.random())
+
+
+        const intervalId = setInterval(() => {
+          if (pixelsToUpdate.length === 0) {
+            clearInterval(intervalId)
+            const background = document.getElementById('background')
+            const currentColor = background.getAttribute('fill')
+            background.setAttribute('fill', nextColor)
+
+            const pixelsToRemove = document.querySelectorAll('rect[remove="true"]')
+            pixelsToRemove.forEach(pixel => pixel.remove())
+            return
+          }
+
+          for (let j = 0; j < 200; j++) {
+            const i = pixelsToUpdate.shift()
+            if (i) {
+              const rect = createRectElement({
+                'x': Math.floor(i / rowCount) * pixelSize,
+                'y': Math.floor(i % rowCount) * pixelSize,
+                'width': pixelSize,
+                'height': pixelSize,
+                'fill': nextColor,
+                'remove': 'true',
+              })
+              background.appendChild(rect)
+            }
+          }
+        }, 1)
+      }
+
+      function onTextChange() {
+        const text = document.getElementById('text').value
+        updateQRCode(text)
+        restartMode(currentModeKey)
+      }
+
+      function onQrCodeChange(element) {
+        const currentValue = element.getAttribute('fill')
+        element.setAttribute('fill', currentValue === WHITE ? BLACK : WHITE)
+
+        // QrScanner.scanImage(svg2img(document.querySelector(#qrcode))).then((res) => {
+        //   document.getElementById('text').value = res
+        // }).catch(() => {
+        //   document.getElementById('text').value = 'INVALID QRCODE'
+        // })
+      }
+
+      function updateQRCode(text) {
+        const code = QRCode.create(text)
+        if (code) {
+          const keys = Object.keys(code.modules.data)
+          const qrCodeWidth = Math.sqrt(keys.length)
+
+          pixelSize = getQrCodeSvgWidth() / qrCodeWidth
+
+          const svg = document.getElementById('qrcode')
+
+          const pixelsToRemove = document.querySelectorAll('#qrcode > rect[pixel="true"]')
+          pixelsToRemove.forEach(pixel => pixel.remove())
+
+          const svgWidth = qrCodeWidth * pixelSize + pixelSize * 6
+
+          svg.setAttribute('width', svgWidth)
+          svg.setAttribute('height', svgWidth)
+
+          for (let i = 0; i < keys.length; i++) {
+            const pixel = code.modules.data[keys[i]]
+            const isReservedPixel = code.modules.reservedBit[keys[i]]
+            const rect = createRectElement({
+              'x': Math.floor(i / qrCodeWidth) * pixelSize + pixelSize * 3,
+              'y': Math.floor(i % qrCodeWidth) * pixelSize + pixelSize * 3,
+              'width': pixelSize,
+              'height': pixelSize,
+              'fill': pixel === 1 ? BLACK : WHITE,
+              'onclick': 'onQrCodeChange(this)',
+              'pixel': 'true',
+              'qrcode': 'true',
+              'reserved': isReservedPixel === 1 ? 'true' : 'false'
+            })
+            svg.appendChild(rect)
+          }
+        }
+      }
+
+      function removePixel(rect) {
+        rect.setAttribute('fill', '#aaa')
+        setTimeout(() => {
+          rect.setAttribute('fill', WHITE)
+        }, 90)
+      }
+
+      function getOverlappingPixel(ball) {
+        const rects = document.querySelectorAll('rect[qrcode="true"]')
+        const pixels = [...rects]
+
+        let overlaps = false
+
+        for (let pixel of pixels) {
+          const pixelColor = pixel.getAttribute('fill')
+
+          if (pixelColor === BLACK) {
+            const overlappingAxis = ball.overlaps(pixel)
+            if (overlappingAxis) return pixel
+          }
+        }
+
+        return undefined
+      }
+
+      onTextChange()
+      onModeChange('1')
+      window.addEventListener("resize", onTextChange)
+    </script>
+  </body>
+</html>
