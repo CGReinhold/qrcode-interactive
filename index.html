@@ -1,6 +1,5 @@
 <html>
   <head>
-    <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.js"></script>
     <style>
       body {
@@ -15,14 +14,19 @@
       #page {
         width: 100%;
         height: 100%;
-        position: absolute;
         mix-blend-mode: difference;
         background-color: #eee;
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
         overflow: hidden;
+      }
+      .input {
+        border: none;
+        background-color: transparent;
+        font-size: 22px;
+        outline: none;
+        font-family: 'Courier New', Courier, monospace;
       }
       span {
         display: block;
@@ -49,29 +53,35 @@
         right: 10px;
       }
       .header {
-        height: 15vh;
+        height: 10vh;
         width: 100vw;
-        position: fixed;
-        top: 0;
         display: flex;
         align-items: center;
         justify-content: center;
         background-color: #eee;
       }
       .footer {
-        height: 15vh;
         width: 100vw;
-        position: fixed;
-        bottom: 0;
+        background-color: #eee;
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .mode-options {
+        margin-top: 10px;
         display: flex;
         align-items: center;
-        justify-content: center;
-        background-color: #eee;
+        display: block;
       }
       #qrcode {
         transition: transform 1s;
       }
+      .hidden {
+        display: none;
+      }
     </style>
+    
     <script>
       // Helper functions
       function random(min, max) { return Math.floor(Math.random() * (max - min + 1) + min) }
@@ -98,6 +108,11 @@
         constructor(id, description) {
           this.id = id
           this.description = description
+        }
+
+        initialize() {
+          document.getElementById('description').innerText = this.description
+          this.start()
         }
 
         start() {
@@ -230,6 +245,20 @@
 
         start() {
           this.addBorders([0, 1, 2, 3])
+
+          const pixels = this.getRectElements({ 'pixel': true })
+          pixels.forEach(pixel => pixel.addEventListener('click', this.elementEvent))
+        }
+
+        elementEvent(element) {
+          const currentValue = element.target.getAttribute('fill')
+          element.target.setAttribute('fill', currentValue === WHITE ? BLACK : WHITE)
+        }
+
+        destroy() {
+          super.destroy()
+          const pixels = this.getRectElements({ 'pixel': true })
+          pixels.forEach(pixel => pixel.removeEventListener('click', this.elementEvent))
         }
       }
 
@@ -250,6 +279,13 @@
           const width = this.getParentWidth() / pixelSize
           const y = Math.floor(width / 2)
           this.snakePosition.push(...[[5, y], [4, y], [3, y]])
+
+          this.snakePosition.forEach(([x, y]) => {
+            const eatenPixel = this.getRectElement({ pixel: true, x: x * pixelSize, y: y * pixelSize, fill: BLACK })
+            if (eatenPixel) {
+              eatenPixel.setAttribute('fill', WHITE)
+            }
+          })
 
           this.addEventListener('keydown', this.movementEvent.bind(this))
           this.renderSnake()
@@ -473,28 +509,28 @@
           const movements = {
             'ArrowRight': () => {
               const hasPixel = this.getRectElement({ pixel: true, x: (x + 1) * pixelSize, y: y * pixelSize, fill: BLACK })
-              if (!hasPixel) {
+              if (!hasPixel && this.playerPosition[0] + 2 < this.getParentWidth() / pixelSize) {
                 this.playerPosition[0]++;
                 this.boardX -= pixelSize;
               }
             },
             'ArrowLeft': () => {
               const hasPixel = this.getRectElement({ pixel: true, x: (x - 1) * pixelSize, y: y * pixelSize, fill: BLACK })
-              if (!hasPixel) {
+              if (!hasPixel && this.playerPosition[0] > 1) {
                 this.playerPosition[0]--;
                 this.boardX += pixelSize;
               }
             },
             'ArrowDown': () => {
               const hasPixel = this.getRectElement({ pixel: true, x: x * pixelSize, y: (y + 1) * pixelSize, fill: BLACK })
-              if (!hasPixel) {
+              if (!hasPixel && this.playerPosition[1] + 2 < this.getParentWidth() / pixelSize) {
                 this.playerPosition[1]++;
                 this.boardY -= pixelSize;
               }
             },
             'ArrowUp': () => {
               const hasPixel = this.getRectElement({ pixel: true, x: x * pixelSize, y: (y - 1) * pixelSize, fill: BLACK })
-              if (!hasPixel) {
+              if (!hasPixel && this.playerPosition[1] > 1) {
                 this.playerPosition[1]--;
                 this.boardY += pixelSize;
               }
@@ -635,26 +671,95 @@
       <div id="page">
 
         <div class="header">
-          <fieldset id="mode-options">
+          <input type="text" id="text" class="input" placeholder="Your URL or text..." autofocus />
+        </div>
+
+        <br>
+        <svg id="qrcode"></svg>
+        <br>
+
+        <div class="footer">
+          <span id="description"></span>
+          <fieldset id="mode-options" class="mode-options">
             <label class="mode"><input type="radio" name="mode" id="mode-1" value="1" checked /> 1 - Free drawing</label>
             <label class="mode"><input type="radio" name="mode" id="mode-2" value="2" /> 2 - Snake</label>
             <label class="mode"><input type="radio" name="mode" id="mode-3" value="3" /> 3 - Brick breaker</label>
             <label class="mode"><input type="radio" name="mode" id="mode-4" value="4" /> 4 - Pong</label>
             <label class="mode"><input type="radio" name="mode" id="mode-5" value="5" /> 5 - Maze</label>
             <label class="mode"><input type="radio" name="mode" id="mode-6" value="6" /> 6 - Gravity</label>
-            <!-- 7 - Poem in qrcode -->
+            <!-- 7 - Game of life -->
           </fieldset>
         </div>
 
-        <br>
-        <svg id="qrcode"></svg>
-        <br>
-        
-        <div class="footer">
-          <label for="text">Text <input type="text" id="text" value="https://cgreinhold.dev" /></label>
-        </div>
+        <button class="theme-picker" aria-hidden="true" style="border: none; cursor: pointer" onclick="changeTheme()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="57" height="57" id="sun">
+             <g>
+              <rect height="3" width="15" y="6" x="21" fill="#222"/>
+              <rect height="3" width="9" y="3" x="24" fill="#222"/>
+              <rect height="3" width="3" y="0" x="27" fill="#222"/>
+             </g>
+             <g>
+              <rect height="15" width="33" y="21" x="12" fill="#222"/>
+              <rect height="33" width="15" y="12" x="21" fill="#222"/>
+              <rect height="27" width="21" y="15" x="18" fill="#222"/>
+              <rect height="21" width="27" y="18" x="15" fill="#222"/>
+             </g>
+             <g transform="rotate(180 28.5 52.5)">
+              <rect height="3" width="15" y="54" x="21" fill="#222"/>
+              <rect height="3" width="9" y="51" x="24" fill="#222"/>
+              <rect height="3" width="3" y="48" x="27" fill="#222"/>
+             </g>
+             <g transform="rotate(90 52.5 28.5)">
+              <rect height="3" width="15" y="30" x="45" fill="#222"/>
+              <rect height="3" width="9" y="27" x="48" fill="#222"/>
+              <rect height="3" width="3" y="24" x="51" fill="#222"/>
+             </g>
+             <g transform="rotate(-90 4.5 28.5)">
+              <rect height="3" width="15" y="30" x="-3" fill="#222"/>
+              <rect height="3" width="9" y="27" x="0" fill="#222"/>
+              <rect height="3" width="3" y="24" x="3" fill="#222"/>
+             </g>
+             <g>
+              <rect height="9" width="3" y="9" x="6" fill="#222"/>
+              <rect height="6" width="3" y="9" x="9" fill="#222"/>
+              <rect height="3" width="3" y="9" x="12" fill="#222"/>
+             </g>
+             <g transform="rotate(90 46.5 13.5)">
+              <rect height="9" width="3" y="9" x="42" fill="#222"/>
+              <rect height="6" width="3" y="9" x="45" fill="#222"/>
+              <rect height="3" width="3" y="9" x="48" fill="#222"/>
+             </g>
+             <g transform="rotate(180 46.5 43.5)">
+              <rect height="9" width="3" y="39" x="42" fill="#222"/>
+              <rect height="6" width="3" y="39" x="45" fill="#222"/>
+              <rect height="3" width="3" y="39" x="48" fill="#222"/>
+             </g>
+             <g transform="rotate(-89.9536 10.5 43.5)">
+              <rect height="9" width="3" y="39" x="6" fill="#222"/>
+              <rect height="6" width="3" y="39" x="9" fill="#222"/>
+              <rect height="3" width="3" y="39" x="12" fill="#222"/>
+             </g>
+           </svg>
 
-        <label class="theme-picker" for="theme-picker">Theme <input type="checkbox" id="theme-picker" onchange="changeTheme()"/></label>
+          <svg xmlns="http://www.w3.org/2000/svg" width="57" height="57" id="moon" class="hidden">
+            <rect height="18" width="18" y="18" x="6" fill="#222"/>
+            <rect height="6" width="21" y="12" x="9" fill="#222"/>
+            <rect height="3" width="3" y="18" x="24" fill="#222"/>
+            <rect height="9" width="6" y="8.70589" x="42" fill="#222"/>
+            <rect height="6" width="6" y="14.70589" x="45" fill="#222"/>
+            <rect height="9" width="30" y="6" x="15" fill="#222"/>
+            <rect height="3" width="18" y="3" x="21" fill="#222"/>
+            <rect height="3" width="3" y="9" x="12" fill="#222"/>
+            <rect height="6" width="21" y="36" x="9" fill="#222"/>
+            <rect height="3" width="3" y="33" x="24" fill="#222"/>
+            <rect height="6" width="30" y="42" x="15" fill="#222"/>
+            <rect height="3" width="3" y="42" x="12" fill="#222"/>
+            <rect height="6" width="18" y="39" x="30" fill="#222"/>
+            <rect height="3" width="9" y="36" x="42" fill="#222"/>
+            <rect height="3" width="3" y="33" x="48" fill="#222"/>
+            <rect height="3" width="19" y="48" x="21" fill="#222"/>
+        </svg>
+        </button>
       </div>
     </div>
     <script >
@@ -679,7 +784,7 @@
         currentModeKey = mode
         if (GAME_MODES[mode]) {
           currentMode = new GAME_MODES[mode]()
-          currentMode.start()
+          currentMode.initialize()
         }
       }
 
@@ -705,7 +810,7 @@
         const greaterDimension = innerWidth// innerHeight > innerWidth ? innerHeight : innerWidth
         const percent = greaterDimension / 100 * 80
         if (percent <= 200) return 200
-        if (percent >= 645) return 550
+        if (percent >= 645) return 450
         return Math.ceil(percent)
       }
 
@@ -717,6 +822,9 @@
         const rowCount = Math.ceil(height / pixelSize)
         const pixelCount = columnCount * rowCount
 
+        document.getElementById('sun').classList.toggle('hidden')
+        document.getElementById('moon').classList.toggle('hidden')
+        
         const currentColor = document.querySelector('#background').getAttribute('fill')
         const nextColor = currentColor === WHITE ? BLACK : WHITE
 
@@ -755,21 +863,13 @@
         }, 1)
       }
 
-      function onTextChange() {
-        const text = document.getElementById('text').value
+      function onTextChange(defaultValue) {
+        const input = document.getElementById('text')
+        const length = input.value.length
+        input.style.width = length ? ((length + 1) * 14) + 'px' : '250px'
+        const text = input.value || defaultValue
         updateQRCode(text)
         restartMode(currentModeKey)
-      }
-
-      function onQrCodeChange(element) {
-        const currentValue = element.getAttribute('fill')
-        element.setAttribute('fill', currentValue === WHITE ? BLACK : WHITE)
-
-        // QrScanner.scanImage(svg2img(document.querySelector(#qrcode))).then((res) => {
-        //   document.getElementById('text').value = res
-        // }).catch(() => {
-        //   document.getElementById('text').value = 'INVALID QRCODE'
-        // })
       }
 
       function updateQRCode(text) {
@@ -799,7 +899,6 @@
               'width': pixelSize,
               'height': pixelSize,
               'fill': pixel === 1 ? BLACK : WHITE,
-              'onclick': 'onQrCodeChange(this)',
               'pixel': 'true',
               'qrcode': 'true',
               'reserved': isReservedPixel === 1 ? 'true' : 'false'
@@ -834,7 +933,7 @@
         return undefined
       }
 
-      onTextChange()
+      onTextChange('https://cgreinhold.dev')
       onModeChange('1')
       window.addEventListener("resize", onTextChange)
     </script>
